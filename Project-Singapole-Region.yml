@@ -1,0 +1,825 @@
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances. Linked to AWS Parameter
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  LatestAmiId:
+    Description: (DO NOT CHANGE)
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    AllowedValues:
+      - /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+#ami-0003ce8d47722ef67
+#VPC2 AWSVPC IDCVPC
+#Subnet6 AWSPublicSN1 AWSPrivateSN1 AWSPrivateSN2 TGWAttachmentSN1 TGWAttachmentSN2 IDCSubnet1
+#IGW2 AWSIGW1 IDCIGW1
+#Route 6 DefaultAWSRoute1 NATRoute1 AWSTGWRoute1  DefaultIDCRoute1 TGWAWSRoute1 TGWIDCRoute1
+#RouteTable2 AWSPublicRT1
+#EIP4 EIP1 EIP3 EIP4 EIP5
+#ENI4 NATENIeth1 NATENIeth3 NATENIeth4 NATENIeth5
+#SG2 AWSSG IDCSG
+#EC22 NATEC21 WEBEC21
+
+
+#Transitgateway1 TransitGateway1
+#DHCP1 DNSOptions
+#Hostedzone1 PrivateDNS1
+#Rsolver Endpoint1
+#CGW1 IDCCGW
+#VPNConnection1 AWSVpnConnection
+
+
+## Route53의 도메인 네임을 hostedzone의 정보 가져와서 수정
+##할것 dnssrv가서 /etc/named.conf Option수정
+##Option 안에 forward only;
+##          forwarders {8.8.8.8}; 2줄 추가
+##          dnssec-enable no;
+##      dnssec-validation no;  2줄 yes->no로 수정
+## 한 번 실행 한 후 TGWStacticRoute에서 TGWRouteTable과  TGWAttachment아이디 입력후 주석해제하고 스택 update
+
+## IDCCGW가서 /etc/ipsec.d/vpnconfig.sh 입력후 CGWIP와 터널IP를 이용하여 VPN설정
+## VPN설정 후 /etc/ipsec.d/aws.config 에서 leftsubnetIP(CGW가위치한)와 rightSubnetIP(연결할 VPC)수정하기
+##PiravteRT1에 Route 10.0.0.0/8 TGW 경로추가
+
+##TGWAWSRoute1에서 항상 문제발생. AWSPrivateRouting에 10.0.0.0/8에 TGW경로추가인데 문제해결 전까진 주석처리필요
+
+Resources:
+###VPC start
+  AWSVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+     CidrBlock: 10.3.0.0/16
+     EnableDnsSupport: true
+     EnableDnsHostnames: true
+     Tags:
+      - Key: Name
+        Value: Singapole-AWS-VPC
+        
+  IDCVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+     CidrBlock: 10.4.0.0/16
+     EnableDnsSupport: false
+     EnableDnsHostnames: false
+     Tags:
+      - Key: Name
+        Value: Singapore-IDC-VPC
+###VPC end
+
+###Transitga start
+  TransitGateway1:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: TGW101
+          
+  TransitGatewayAtt1:
+    Type: AWS::EC2::TransitGatewayAttachment
+    DependsOn: AWSVPC
+    Properties:
+      SubnetIds:
+        - !Ref TGWAttachmentSN1
+        - !Ref TGWAttachmentSN2
+      VpcId: !Ref AWSVPC
+      TransitGatewayId: !Ref TransitGateway1
+      Tags:
+        - Key: Name
+          Value: TGW1-ATT1-AWSVPC
+
+###Transitga end
+
+###Subnet start   
+  AWSPublicSN1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.3.1.0/24
+      AvailabilityZone: !Select [ 0,!GetAZs '']
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: NATInstance-VPC1-Subnet1
+  AWSPrivateSN1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.3.3.0/24
+      AvailabilityZone: !Select [ 0,!GetAZs '']
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: NATInstance-VPC1-Pri-Subnet1
+          
+          
+  AWSPrivateSN2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.3.4.0/24
+      AvailabilityZone: !Select [ 2,!GetAZs '']
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: NATInstance-VPC1-Pri-Subnet2
+
+  IDCSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.4.1.0/24
+      AvailabilityZone: !Select [ 0,!GetAZs '']
+      VpcId: !Ref IDCVPC
+      Tags:
+        - Key: Name
+          Value: IDC-Subent1
+
+          
+  TGWAttachmentSN1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.3.5.0/24
+      AvailabilityZone: !Select [ 0,!GetAZs '']
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: NATInstance-VPC1-Subnet1-Att
+          
+  TGWAttachmentSN2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.3.6.0/24
+      AvailabilityZone: !Select [ 2,!GetAZs '']
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: NATInstance-VPC1-Subnet2-Att
+          
+###Subnet end
+
+###Internetgateway start   
+  AWSIGW1:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: AWS-Singapole-IGW
+          
+  AWSIGW1Attachment1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref AWSIGW1
+      VpcId: !Ref AWSVPC
+      
+  IDCIGW1:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: IDC-Singapore-IGW
+          
+  IDCIGW1Attachment1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref IDCIGW1
+      VpcId: !Ref IDCVPC
+###Internetgateway End
+
+### Route & Table Start
+  AWSPublicRT1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: AWS-Singapole-Public-RT
+          
+  DefaultAWSRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AWSPublicRT1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref AWSIGW1
+
+  # AWSTGWRoute1:
+    # Type: AWS::EC2::Route
+    # DependsOn: TransitGatewayAtt1
+    # Properties:
+      # RouteTableId: !Ref AWSPublicRT1
+      # DestinationCidrBlock: 10.0.0.0/8
+      # TransitGatewayId: !Ref TransitGateway1
+      
+  AWSPrivateRT1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AWSVPC
+      Tags:
+        - Key: Name
+          Value: AWS-Singapole-Private-RT1
+          
+  NATRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AWSPrivateRT1
+      DestinationCidrBlock: 0.0.0.0/0
+      NetworkInterfaceId: !Ref NATENIeth1
+      
+  IDCPublicRT1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref IDCVPC
+      Tags:
+        - Key: Name
+          Value: IDC-Singapore-Public-RT
+          
+  DefaultIDCRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref IDCPublicRT1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IDCIGW1
+      
+  TGWIDCRoute1:
+    DependsOn: NATENIeth5
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref IDCPublicRT1
+      DestinationCidrBlock: 10.0.0.0/8
+      InstanceId: !Ref CGWEC2
+      
+  # TGWAWSRoute1:
+    # Type: AWS::EC2::Route
+    # Properties:
+      # RouteTableId: !Ref AWSPrivateRT1
+      # DestinationCidrBlock: 10.0.0.0/8
+      # TransitGatewayId: !Ref TransitGateway1
+
+### Route & Table  end
+
+###Routetalbe Association start
+  PublicSN1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AWSPublicRT1
+      SubnetId: !Ref AWSPublicSN1
+      
+  PrivateSN1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AWSPrivateRT1
+      SubnetId: !Ref AWSPrivateSN1
+
+  PrivateSN2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref AWSPrivateRT1
+      SubnetId: !Ref AWSPrivateSN2
+      
+  IDCPublicSN1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref IDCPublicRT1
+      SubnetId: !Ref IDCSubnet1
+###Routetalbe Association end
+
+###DHCP Start
+  DNSOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: idcsingapore.internal
+      DomainNameServers:
+        - 10.4.1.200, 8.8.8.8
+      NtpServers:
+        - 203.248.240.140, 168.126.3.6
+      Tags:
+        - Key: Name
+          Value: IDC-DHCPOptions
+          
+  DNSOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      DhcpOptionsId: !Ref DNSOptions
+      VpcId: !Ref IDCVPC
+###DHCP Start
+
+###EIP,ENI Start
+  EIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      
+  NATENIeth1:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref AWSPublicSN1
+      Description: NAT-Instance eth0
+      GroupSet:
+        - !Ref AWSSG
+      Tags:
+        - Key: Name
+          Value: NAT-Instance-eth0
+      PrivateIpAddress: 10.3.1.100
+          
+  VPCAssociateEIP1:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIP1.AllocationId
+      NetworkInterfaceId: !Ref NATENIeth1
+      
+  EIP3:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      
+  NATENIeth3:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref IDCSubnet1
+      Description: DNS-Instance-eth1
+      GroupSet:
+        - !Ref IDCSG
+      Tags:
+        - Key: Name
+          Value: DNS-Instance-eth1
+      PrivateIpAddress: 10.4.1.200
+          
+  VPCAssociateEIP3:  
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIP3.AllocationId
+      NetworkInterfaceId: !Ref NATENIeth3
+
+  EIP4:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      
+  NATENIeth4:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref IDCSubnet1
+      Description: DB-Instance-eth1
+      GroupSet:
+        - !Ref IDCSG
+      Tags:
+        - Key: Name
+          Value: DB-Instance-eth1
+      PrivateIpAddress: 10.4.1.100
+          
+  VPCAssociateEIP4:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIP4.AllocationId
+      NetworkInterfaceId: !Ref NATENIeth4
+
+  EIP5:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      
+  NATENIeth5:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref IDCSubnet1
+      Description: DB-Instance-eth1
+      GroupSet:
+        - !Ref IDCSG
+      Tags:
+        - Key: Name
+          Value: CGW-Instance-eth1
+      PrivateIpAddress: 10.4.1.250
+      SourceDestCheck: false
+          
+  VPCAssociateEIP5:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt EIP5.AllocationId
+      NetworkInterfaceId: !Ref NATENIeth5
+
+###EIP,ENI end
+
+### Security Group start
+  AWSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable http ans SSH  dns53 and icmp access
+      VpcId: !Ref AWSVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 4500
+        ToPort: 4500
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 53
+        ToPort: 53
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 53
+        ToPort: 53
+        CidrIp: 0.0.0.0/0
+  IDCSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable http ans SSH  dns53 and icmp access
+      VpcId: !Ref IDCVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: icmp
+        FromPort: -1
+        ToPort: -1
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 4500
+        ToPort: 4500
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 53
+        ToPort: 53
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 53
+        ToPort: 53
+        CidrIp: 0.0.0.0/0
+### Security Group end
+
+### Instance start
+  NATEC21:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-037e3d0f6fefc2f5a
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: NAT-Instance-1
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref NATENIeth1
+          DeviceIndex: 0
+      SourceDestCheck: false
+      
+  WEBEC21:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: AWS-Web-Srv-1
+      NetworkInterfaces:
+        - DeviceIndex: 0      
+          SubnetId: !Ref AWSPrivateSN1
+          GroupSet:
+            - !Ref AWSSG
+          PrivateIpAddress: 10.3.3.100
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          (
+          echo "qwe123"
+          echo "qwe123"
+          ) | passwd --stdin root
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+          service sshd restart
+          hostnamectl --static set-hostname Singapore-AWS-WebSrv1
+          amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+          yum install -y httpd lynx
+          systemctl start httpd && systemctl enable httpd
+          mkdir /var/www/inc
+          curl -o /var/www/inc/dbinfo.inc https://cloudneta-book.s3.ap-northeast-2.amazonaws.com/chapter8/dbinfo.inc
+          curl -o /var/www/html/db.php https://cloudneta-book.s3.ap-northeast-2.amazonaws.com/chapter8/db2.php
+          rm -rf /var/www/html/index.html
+          echo "<h1>CloudNet@ FullLab - SingaporeRegion - Websrv1</h1>" > /var/www/html/index.html
+          curl -o /opt/pingcheck.sh https://cloudneta-book.s3.ap-northeast-2.amazonaws.com/chapter8/pingchecker2.sh
+          # chmod +x /opt/pingcheck.sh
+          # cat <<EOT>> /etc/crontab
+          # */3 * * * * root /opt/pingcheck.sh
+          # EOT
+          echo "1" > /var/www/html/HealthCheck.txt
+          
+  DNSSrv:
+    Type: AWS::EC2::Instance
+    Properties:   
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: IDC-DNSSRV
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref NATENIeth3
+          DeviceIndex: 0
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          hostnamectl --static set-hostname DNSSRV
+          sed -i "s/^127.0.0.1 localhost/127.0.0.1 localhost DNSSRV/g" /etc/hosts
+          sed -i "s/dnssec-enable no/dnssec-enable yes/g" /etc/named.conf
+          sed -i "s/dnssec-validation no/dnssec-validation no/g" /etc/named.conf
+          yum update -y
+          yum install bind bind-utils bind-libs -y
+          yum install httpd -y
+          EOF
+          # named.conf.
+
+          # named.conf.local
+          cat <<EOF>> /etc/named.rfc1912.zones
+          zone "awssingapore.internal" IN {
+                type forward;
+                forward only;
+                forwarders { 10.3.3.250; };
+
+                };
+                
+          zone "idcsingapore.internal" IN {
+                type master;
+                file "idcsingapore.zone";
+                allow-update {none; };
+                };
+                
+          zone "awsseoul.internal" IN {
+                type forward;
+                forward only;
+                forwarders { 10.1.3.250; 10.1.4.250; };
+
+                };
+                
+          zone "idcseoul.internal" IN {
+                type forward;
+                forward only;
+                forwarders { 10.2.1.200; };
+
+                };
+
+
+
+          EOF
+          # db.idcsingapore.internal
+          cat <<EOF> /var/named/idcsingapore.zone
+          \$TTL 30
+          @ IN SOA ns1.idcsingapore.internal. root.idcsingapore.internal. (
+            2019122114 ; serial
+            3600       ; refresh
+            900        ; retry
+            604800     ; expire
+            86400      ; minimum ttl
+          )
+
+          ; dns server
+          @      IN NS ns1.idcsingapore.internal.
+
+          ; ip address of dns server
+          ns1    IN A  10.4.1.200
+
+          ; Hosts
+          dbsrv   IN A  10.4.1.100
+          dnssrv   IN A  10.4.1.200
+          EOF
+          #sed -i "s/^listenOn{127.0.0.1;};/g"
+          systemctl start named && systemctl enable named
+          systemctl start httpd && systemctl enable httpd
+          chown root.named /var/named/idcsingapore.zone
+          systemctl restart named
+
+  DBSrv:
+    Type: AWS::EC2::Instance
+    Properties:   
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: IDC-DBSRV
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref NATENIeth4
+          DeviceIndex: 0
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          hostnamectl --static set-hostname Singapore-IDC-DB
+          yum install -y mariadb-server mariadb lynx
+          systemctl start mariadb && systemctl enable mariadb
+          echo -e "\n\nqwe123\nqwe123\ny\ny\ny\ny\n" | /usr/bin/mysql_secure_installation
+          mysql -uroot -pqwe123 -e "CREATE DATABASE sample; GRANT ALL PRIVILEGES ON *.* TO 'gasida'@'%' IDENTIFIED BY 'qwe123'; GRANT REPLICATION SLAVE ON *.* TO 'repl_user'@'%' IDENTIFIED BY 'qwe123'; flush privileges;"
+          mysql -uroot -pqwe123 -e "USE sample;CREATE TABLE EMPLOYEES (ID int(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,NAME VARCHAR(45),ADDRESS VARCHAR(90));"
+          cat <<EOT> /etc/my.cnf
+          [mysqld]
+          datadir=/var/lib/mysql
+          socket=/var/lib/mysql/mysql.sock
+          symbolic-links=0        
+          #아래부분만 추가할것         
+          log-bin=mysql-bin
+          server-id=1
+          [mysqld_safe]
+          log-error=/var/log/mariadb/mariadb.log
+          pid-file=/var/run/mariadb/mariadb.pid
+          !includedir /etc/my.cnf.d
+          EOT
+          systemctl restart mariadb
+          cat <<EOT> /home/ec2-user/list.txt
+          10.1.3.100
+          websrv1.awsseoul.internal
+          10.1.4.100
+          websrv2.awsseoul.internal
+          10.2.1.100
+          dbsrv.idcseoul.internal
+          10.2.1.200
+          dnssrv.idcseoul.internal
+          10.3.3.100
+          websrv1.awssingapore.internal
+          10.4.1.100
+          dbsrv.idcsingapore.internal
+          10.4.1.200
+          dnssrv.idcsingapore.internal
+          EOT
+          curl -o /home/ec2-user/pingall.sh https://cloudneta-book.s3.ap-northeast-2.amazonaws.com/chapter6/pingall.sh --silent
+          chmod +x /home/ec2-user/pingall.sh
+          
+
+  CGWEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: IDC-CGW
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref NATENIeth5
+          DeviceIndex: 0
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          hostnamectl --static set-hostname IDC-CGW
+          yum -y install tcpdump openswan
+          cat <<EOF>> /etc/sysctl.conf
+          net.ipv4.ip_forward=1
+          EOF
+          sysctl -p /etc/sysctl.conf
+          curl -o /etc/ipsec.d/vpnconfig.sh https://cloudneta-book.s3.ap-northeast-2.amazonaws.com/chapter6/6_lab_s2s-vpnconfig.sh
+          chmod +x /etc/ipsec.d/vpnconfig.sh
+
+### Instance end
+
+
+###Hosted Zone start
+  PrivateDNS1:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      HostedZoneConfig:
+        Comment: Private hosted zone
+      Name: awssingapore.internal
+      VPCs:
+        - VPCId: !Ref AWSVPC
+          VPCRegion: ap-southeast-1
+      HostedZoneTags:
+        - Key: Name
+          Value: awsresolver
+          
+  DNSReocrdInstnace1:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref PrivateDNS1
+      Comment: websrv1
+      Name: websrv1.awssingapore.internal
+      Type: A
+      TTL: 60
+      ResourceRecords:
+      - !GetAtt WEBEC21.PrivateIp
+
+###Hosted Zone End
+
+### Resolver Endpoint start  Inbound Endpoint ,Outbound Endpoint, Forward Rule , Rule Association     
+  InboundEP:
+    Type: AWS::Route53Resolver::ResolverEndpoint
+    Properties:
+      Direction: INBOUND
+      IpAddresses:
+        - Ip: 10.3.3.250
+          SubnetId: !Ref AWSPrivateSN1
+        - Ip: 10.3.4.250
+          SubnetId: !Ref AWSPrivateSN2
+      SecurityGroupIds:
+        - !Ref AWSSG
+      Tags:
+        - Key: Name
+          Value: idc-to-aws-inbound
+  OutboundEP:
+    Type: AWS::Route53Resolver::ResolverEndpoint
+    Properties:
+      Direction: OUTBOUND
+      IpAddresses:
+        - Ip: 10.3.3.251
+          SubnetId: !Ref AWSPrivateSN1
+        - Ip: 10.3.4.251
+          SubnetId: !Ref AWSPrivateSN2
+      SecurityGroupIds:
+        - !Ref AWSSG
+      Tags:
+        - Key: Name
+          Value: aws-to-idc-outbound          
+
+  ForwardRule:
+    Type: AWS::Route53Resolver::ResolverRule
+    Properties:
+       DomainName: idcsingapore.internal
+       Name: outbound-rule
+       ResolverEndpointId: !Ref OutboundEP
+       RuleType: FORWARD
+       TargetIps:
+         - Ip: 10.4.1.200
+           Port: 53
+           
+  ResoleverRuleAssociation:
+    Type: AWS::Route53Resolver::ResolverRuleAssociation
+    Properties:
+      Name: Resolver-association
+      ResolverRuleId: !Ref ForwardRule
+      VPCId: !Ref AWSVPC
+### Resolver Endpoint end
+
+###VPN start CustomerGateway , VPNConnection, TransitGatewayRoute
+  IDCCGW:
+    Type: AWS::EC2::CustomerGateway
+    Properties:
+      Type: ipsec.1
+      BgpAsn: 65000
+      IpAddress: !Ref EIP5
+      Tags:
+        - Key: Name
+          Value: IDC-VPN-CGW
+          
+  AWSVpnConnection:
+    Type: AWS::EC2::VPNConnection
+    Properties:
+      Type: ipsec.1
+      StaticRoutesOnly: true
+      CustomerGatewayId:
+          !Ref IDCCGW
+      TransitGatewayId:
+          !Ref TransitGateway1
+      VpnTunnelOptionsSpecifications:
+          - PreSharedKey: cloudneta
+      Tags:
+          - Key: Name
+            Value: AWS-VPNConnection-IDC
+          
+  # TGWStacticRoute:
+    # Type: AWS::EC2::TransitGatewayRoute
+    # Properties:
+      # DestinationCidrBlock: 10.4.0.0/16
+      # # 기본 transitgateway 라우팅테이블ID
+      # TransitGatewayRouteTableId: tgw-rtb-0f04786d121ab4e30
+      # # VPN연결시 생성된 transitgateway 연결ID      
+      # TransitGatewayAttachmentId: tgw-attach-0dbfb7908eb164aaf
+###VPN end
+
+Outputs:
+  AWSNAT1IP:
+    Description: Public IP assigned to AWS WEBSRV1 Instance eth0 interface
+    Value: !GetAtt NATEC21.PublicIp
+  AWSWEB1IP:
+    Description: Public IP assigned to AWS WEBSRV1 Instance eth0 interface
+    Value: !GetAtt WEBEC21.PrivateIp
+  IDCDNSIP:
+    Description: Public IP assigned to AWS WEBSRV1 Instance eth0 interface
+    Value: !GetAtt DNSSrv.PublicIp
+  IDCDBIP:
+    Description: Public IP assigned to AWS WEBSRV1 Instance eth0 interface
+    Value: !GetAtt DBSrv.PublicIp
+  IDCCGWIP:
+    Description: Public IP assigned to AWS WEBSRV1 Instance eth0 interface
+    Value: !GetAtt CGWEC2.PublicIp
